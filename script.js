@@ -1,19 +1,38 @@
 // --- Game Config ---
-const waterPerDay = 20;
-const thresholds = {
-    drinking: 2,
-    cooking: 3,
-    cleaning: 2,
-    hygiene: 2
+const difficultySettings = {
+    easy: {
+        waterPerDay: 25,
+        timerDuration: 75,
+        thresholds: {drinking: 1, cooking: 2, cleaning: 1, hygiene: 1},
+        ideal: {drinking: 4, cooking: 6, cleaning: 5, hygiene: 4},
+        scoreMultiplier: 0.8,
+        waterDropCount: 5
+    },
+    normal: {
+        waterPerDay: 20,
+        timerDuration: 60,
+        thresholds: {drinking: 2, cooking: 3, cleaning: 2, hygiene: 2},
+        ideal: {drinking: 3, cooking: 5, cleaning: 4, hygiene: 3},
+        scoreMultiplier: 1,
+        waterDropCount: 4
+    },
+    hard: {
+        waterPerDay: 15,
+        timerDuration: 45,
+        thresholds: {drinking: 3, cooking: 4, cleaning: 3, hygiene: 3},
+        ideal: {drinking: 4, cooking: 6, cleaning: 5, hygiene: 4},
+        scoreMultiplier: 1.2,
+        waterDropCount: 3
+    }
 };
-const ideal = {
-    drinking: 3,
-    cooking: 5,
-    cleaning: 4,
-    hygiene: 3
-};
-const timerDuration = 60; // seconds
 const totalDays = 7;
+
+let currentDifficulty = 'normal';
+let waterPerDay = difficultySettings[currentDifficulty].waterPerDay;
+let timerDuration = difficultySettings[currentDifficulty].timerDuration;
+let thresholds = {...difficultySettings[currentDifficulty].thresholds};
+let ideal = {...difficultySettings[currentDifficulty].ideal};
+let scoreMultiplier = difficultySettings[currentDifficulty].scoreMultiplier;
 
 let currentDay = 1;
 let timer = timerDuration;
@@ -25,9 +44,19 @@ let allocations = {
     cleaning: 0,
     hygiene: 0
 };
-let waterAvailable = waterPerDay;
+let bonusWater = 0;
 let waterAllocated = 0;
 let survivedAll = true;
+let totalScore = 0;
+let shownMilestones = new Set();
+
+const milestones = [
+    { score: 5, message: "Getting started!" },
+    { score: 10, message: "Halfway there!" },
+    { score: 15, message: "You're doing great!" },
+    { score: 20, message: "Almost there!" },
+    { score: 25, message: "Master survivor!" }
+];
 
 const events = [
     { desc: "Pipe leak! You lose 2 liters of water.", effect: { water: -2 } },
@@ -54,6 +83,8 @@ const availableWater = document.getElementById('available-water');
 const allocatedWaterLabel = document.getElementById('allocated-water-label');
 const waterProgressBar = document.getElementById('water-progress-bar');
 const timerDisplay = document.getElementById('timer');
+const difficultyRadios = document.querySelectorAll('input[name="difficulty"]');
+const dropContainer = document.getElementById('drop-container');
 
 const drinkingSlider = document.getElementById('drinking-slider');
 const cookingSlider = document.getElementById('cooking-slider');
@@ -79,6 +110,13 @@ resetBtn.addEventListener('click', restartGame);
     slider.addEventListener('input', updateValues);
 });
 
+difficultyRadios.forEach(radio => {
+    radio.addEventListener('change', () => {
+        currentDifficulty = radio.value;
+        applyDifficultySettings();
+    });
+});
+
 // --- Functions ---
 function updateValues() {
     allocations.drinking = parseInt(drinkingSlider.value);
@@ -92,14 +130,63 @@ function updateValues() {
     hygieneValue.textContent = allocations.hygiene + 'L';
 
     waterAllocated = allocations.drinking + allocations.cooking + allocations.cleaning + allocations.hygiene;
-    availableWater.textContent = Math.max(0, waterPerDay - waterAllocated);
-    allocatedWaterLabel.textContent = waterAllocated + 'L / ' + waterPerDay + 'L';
-    let percent = Math.min(100, (waterAllocated / waterPerDay) * 100);
+    const totalAvailable = waterPerDay + bonusWater;
+    const remaining = Math.max(0, totalAvailable - waterAllocated);
+    availableWater.textContent = remaining;
+    allocatedWaterLabel.textContent = waterAllocated + 'L / ' + totalAvailable + 'L';
+    let percent = Math.min(100, (waterAllocated / Math.max(1, totalAvailable)) * 100);
     waterProgressBar.style.width = percent + '%';
 }
 
+function setSliderMax() {
+    const totalAvailable = waterPerDay + bonusWater;
+    [drinkingSlider, cookingSlider, cleaningSlider, hygieneSlider].forEach(slider => {
+        slider.max = totalAvailable;
+    });
+}
+
+function applyDifficultySettings() {
+    const settings = difficultySettings[currentDifficulty] || difficultySettings.normal;
+    waterPerDay = settings.waterPerDay;
+    timerDuration = settings.timerDuration;
+    thresholds = {...settings.thresholds};
+    ideal = {...settings.ideal};
+    scoreMultiplier = settings.scoreMultiplier;
+    bonusWater = 0;
+
+    // Update threshold labels for player clarity
+    document.querySelectorAll('.cat-min')[0].textContent = `Min: ${thresholds.drinking}L | Ideal: ${ideal.drinking}L`;
+    document.querySelectorAll('.cat-min')[1].textContent = `Min: ${thresholds.cooking}L | Ideal: ${ideal.cooking}L`;
+    document.querySelectorAll('.cat-min')[2].textContent = `Min: ${thresholds.cleaning}L | Ideal: ${ideal.cleaning}L`;
+    document.querySelectorAll('.cat-min')[3].textContent = `Min: ${thresholds.hygiene}L | Ideal: ${ideal.hygiene}L`;
+
+    setSliderMax();
+    updateValues();
+    generateWaterDrops();
+}
+
+function generateWaterDrops() {
+    dropContainer.innerHTML = '';
+    const count = difficultySettings[currentDifficulty]?.waterDropCount || 4;
+    for (let i = 0; i < count; i++) {
+        const drop = document.createElement('div');
+        drop.className = 'water-drop';
+        drop.textContent = '💧';
+        drop.title = 'Click to collect +1L water';
+        drop.addEventListener('click', () => {
+            if (drop.classList.contains('collected')) return;
+            drop.classList.add('collected');
+            drop.remove();
+            bonusWater += 1;
+            updateValues();
+        });
+        dropContainer.appendChild(drop);
+    }
+}
+
 function startGame() {
-    // Hide all screens except allocation
+    // Apply selected difficulty settings and hide all screens except allocation
+    applyDifficultySettings();
     document.getElementById('start-screen').classList.add('hidden');
     document.getElementById('event-screen').classList.add('hidden');
     document.getElementById('outcome-screen').classList.add('hidden');
@@ -142,7 +229,8 @@ function startTimer() {
 function allocateWater() {
     clearInterval(timerInterval);
     waterAllocated = allocations.drinking + allocations.cooking + allocations.cleaning + allocations.hygiene;
-    if (waterAllocated > waterPerDay) {
+    const totalAvailable = waterPerDay + bonusWater;
+    if (waterAllocated > totalAvailable) {
         alert("You allocated more water than available!");
         return;
     }
@@ -193,27 +281,55 @@ function checkOutcome() {
         message += "Game Over!";
         survivedAll = false;
         document.getElementById('outcome-message').textContent = message;
+        document.getElementById('milestone-message').textContent = '';
         document.getElementById('next-day-btn').textContent = "End Game";
         document.getElementById('outcome-screen').classList.remove('hidden');
     } else {
         message += "Well done!";
+        // Calculate daily score and add to total
+        let dailyScore = 0;
+        dailyScore += Math.max(0, Math.min(allocations.drinking, ideal.drinking) - thresholds.drinking);
+        dailyScore += Math.max(0, Math.min(allocations.cooking, ideal.cooking) - thresholds.cooking);
+        dailyScore += Math.max(0, Math.min(allocations.cleaning, ideal.cleaning) - thresholds.cleaning);
+        dailyScore += Math.max(0, Math.min(allocations.hygiene, ideal.hygiene) - thresholds.hygiene);
+        dailyScore = Math.round(dailyScore * scoreMultiplier);
+        totalScore += dailyScore;
+
+        // Check for milestones
+        let milestoneMessage = '';
+        for (let milestone of milestones) {
+            if (totalScore >= milestone.score && !shownMilestones.has(milestone.score)) {
+                milestoneMessage = milestone.message;
+                shownMilestones.add(milestone.score);
+                break; // Show only the first new milestone reached
+            }
+        }
+
         document.getElementById('outcome-message').textContent = message;
+        document.getElementById('milestone-message').textContent = milestoneMessage;
         document.getElementById('next-day-btn').textContent = currentDay === totalDays ? "See Results" : "Next Day";
         document.getElementById('outcome-screen').classList.remove('hidden');
     }
 }
 
 function nextDay() {
-    if (!survivedAll || currentDay >= totalDays) {
-        endGame(survivedAll);
-    } else {
-        currentDay++;
-        dayNumber.textContent = currentDay;
-        document.getElementById('outcome-screen').classList.add('hidden');
-        document.getElementById('allocation-screen').classList.remove('hidden');
-        resetAllocations();
-        startTimer();
+    if (!survivedAll) {
+        endGame(false);
+        return;
     }
+
+    if (currentDay >= totalDays) {
+        endGame(true);
+        return;
+    }
+
+    currentDay++;
+    dayNumber.textContent = currentDay;
+    document.getElementById('outcome-screen').classList.add('hidden');
+    document.getElementById('allocation-screen').classList.remove('hidden');
+    resetAllocations();
+    generateWaterDrops();
+    startTimer();
 }
 
 function endGame(success) {
@@ -221,16 +337,10 @@ function endGame(success) {
     document.getElementById('end-screen').classList.remove('hidden');
     if (success) {
         document.getElementById('end-message').textContent = "Congratulations! You survived all 7 days.";
-        // Calculate score: sum of how close to ideal allocations
-        let score = 0;
-        score += Math.max(0, Math.min(allocations.drinking, ideal.drinking) - thresholds.drinking);
-        score += Math.max(0, Math.min(allocations.cooking, ideal.cooking) - thresholds.cooking);
-        score += Math.max(0, Math.min(allocations.cleaning, ideal.cleaning) - thresholds.cleaning);
-        score += Math.max(0, Math.min(allocations.hygiene, ideal.hygiene) - thresholds.hygiene);
-        document.getElementById('score-value').textContent = score;
+        document.getElementById('score-value').textContent = totalScore + " (" + currentDifficulty + " mode)";
     } else {
         document.getElementById('end-message').textContent = "You didn't survive all days.";
-        document.getElementById('score-value').textContent = 0;
+        document.getElementById('score-value').textContent = totalScore + " (" + currentDifficulty + " mode)";
     }
 }
 
@@ -248,6 +358,8 @@ function restartGame() {
     waterAvailable = waterPerDay;
     waterAllocated = 0;
     survivedAll = true;
+    totalScore = 0;
+    shownMilestones.clear();
     dayNumber.textContent = currentDay;
     timerDisplay.textContent = timer;
     drinkingSlider.value = 0;
